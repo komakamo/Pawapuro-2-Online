@@ -350,13 +350,17 @@ export default function PennantGame() {
 
   const playDay = () => {
     if (currentDay > TOTAL_GAMES) return;
+    if (teams.length < 6) {
+      setIsPlaying(false);
+      return;
+    }
 
     const shuffled = [...teams].sort(() => Math.random() - 0.5);
-    const matchups = [
-      [shuffled[0], shuffled[1]],
-      [shuffled[2], shuffled[3]],
-      [shuffled[4], shuffled[5]]
-    ];
+    const matchups: [Team, Team][] = [];
+
+    for (let i = 0; i < shuffled.length - 1; i += 2) {
+      matchups.push([shuffled[i], shuffled[i + 1]]);
+    }
 
     const dayResults: GameResult[] = [];
     const nextTeamsState = [...teams];
@@ -376,6 +380,8 @@ export default function PennantGame() {
     setGameHistory(prev => [...dayResults, ...prev]);
     setCurrentDay(d => d + 1);
   };
+
+  const hasMinimumTeams = teams.length >= 6;
 
   const sortedTeams = useMemo(() => {
     return [...teams].sort((a, b) => {
@@ -535,21 +541,22 @@ export default function PennantGame() {
             <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
               {currentDay <= TOTAL_GAMES ? (
                 <>
-                  <button 
+                  <button
                     onClick={() => { setGameSpeed(500); setIsPlaying(!isPlaying); }}
+                    disabled={!hasMinimumTeams}
                     className={`flex-1 md:flex-none flex items-center justify-center space-x-2 px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all transform active:scale-95 hover:shadow-xl ${
-                      isPlaying 
-                      ? 'bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700' 
+                      isPlaying
+                      ? 'bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700'
                       : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700'
-                    }`}
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
                     <span>{isPlaying ? 'STOP' : 'START'}</span>
                   </button>
-                  
-                  <button 
+
+                  <button
                     onClick={() => { setGameSpeed(50); setIsPlaying(true); }}
-                    disabled={isPlaying}
+                    disabled={isPlaying || !hasMinimumTeams}
                     className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed border border-slate-200 shadow-sm"
                     title="高速進行"
                   >
