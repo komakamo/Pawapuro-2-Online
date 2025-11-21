@@ -215,19 +215,35 @@ const simulateMatch = (home: Team, away: Team, day: number): { result: GameResul
 
       if (p.position === 'P') {
         const isStarter = p.id.endsWith('p1') || p.id.endsWith('p2');
-        if (!isStarter) return p;
 
-        const innings = isStarter ? (Math.random() * 3 + 5) : 1;
-        const er = Math.floor((oppScore / 9) * innings);
-        
-        newP.games += 1;
-        newP.innings += innings;
-        newP.earnedRuns += er;
-        if (isWin && isStarter) { newP.wins += 1; xpGained += 50; }
-        if (isLoss && isStarter) { newP.losses += 1; xpGained += 10; }
-        
-        xpGained += innings * 5;
-        if (er === 0) xpGained += 30;
+        if (isStarter) {
+          const innings = Math.random() * 3 + 5;
+          const er = Math.floor((oppScore / 9) * innings);
+
+          newP.games += 1;
+          newP.innings += innings;
+          newP.earnedRuns += er;
+          if (isWin) { newP.wins += 1; xpGained += 50; }
+          if (isLoss) { newP.losses += 1; xpGained += 10; }
+
+          xpGained += innings * 5;
+          if (er === 0) xpGained += 30;
+        } else {
+          const innings = Math.random() * 2 + 1; // 1~3回程度を想定
+          const er = Math.max(0, Math.floor((oppScore / 9) * innings + (Math.random() < 0.3 ? 1 : 0)));
+
+          newP.games += 1;
+          newP.innings += innings;
+          newP.earnedRuns += er;
+
+          const pitchedCleanInWin = isWin && er === 0;
+          if (isWin && Math.random() < 0.25) { newP.wins += 1; xpGained += 30; }
+          else if (pitchedCleanInWin) { newP.saves += 1; xpGained += 40; }
+          else if (isLoss) { newP.losses += 1; xpGained += 10; }
+
+          xpGained += innings * 4;
+          if (er === 0) xpGained += 20;
+        }
 
       } else {
         const abs = Math.floor(Math.random() * 2) + 3;
@@ -470,8 +486,10 @@ export default function PennantGame() {
           <>
             <td className="p-2 text-center">{renderAbilityRank(player.stamina)}</td>
             <td className="p-2 text-center">{renderAbilityRank(player.control)}</td>
+            <td className="p-2 text-right font-mono text-gray-700">{player.games}</td>
+            <td className="p-2 text-right font-mono text-gray-700">{player.innings.toFixed(1)}</td>
             <td className="p-2 text-right font-mono font-bold text-gray-700 text-lg">{era}</td>
-            <td className="p-2 text-right text-sm text-gray-600">{player.wins}勝 {player.losses}敗</td>
+            <td className="p-2 text-right text-sm text-gray-600">{player.wins}勝 {player.losses}敗 {player.saves}S</td>
           </>
         ) : (
           <>
@@ -819,8 +837,10 @@ export default function PennantGame() {
                           <th className="p-3 text-left">Name / Age</th>
                           <th className="p-3 text-center">Sta</th>
                           <th className="p-3 text-center">Con</th>
+                          <th className="p-3 text-right">G</th>
+                          <th className="p-3 text-right">IP</th>
                           <th className="p-3 text-right">ERA</th>
-                          <th className="p-3 text-right">W-L</th>
+                          <th className="p-3 text-right">W-L-S</th>
                         </tr>
                       </thead>
                       <tbody>
