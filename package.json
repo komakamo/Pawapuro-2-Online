@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "deploy": "gh-pages -d docs"
+    "deploy": "gh-pages -d docs",
+    "test": "vitest"
   },
   "dependencies": {
     "lucide-react": "^0.479.0",
@@ -19,6 +20,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "gh-pages": "^6.1.1",
     "typescript": "^5.4.5",
-    "vite": "^5.2.12"
+    "vite": "^5.2.12",
+    "vitest": "^2.1.1"
   }
 }

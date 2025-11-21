@@ -14,7 +14,7 @@ const TEAMS_CONFIG = [
 
 type Condition = 'excellent' | 'good' | 'normal' | 'bad' | 'terrible';
 
-interface Player {
+export interface Player {
   id: string;
   name: string;
   position: 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'OF';
@@ -43,7 +43,7 @@ interface Player {
   saves: number;
 }
 
-interface Team {
+export interface Team {
   id: string;
   name: string;
   short: string;
@@ -59,7 +59,7 @@ interface Team {
   runsAllowed: number;
 }
 
-interface GameResult {
+export interface GameResult {
   day: number;
   homeId: string;
   awayId: string;
@@ -68,6 +68,10 @@ interface GameResult {
   details: string[];
   growthUpdates: string[];
 }
+
+const VALID_CONDITIONS: Condition[] = ['excellent', 'good', 'normal', 'bad', 'terrible'];
+const VALID_POSITIONS: Player['position'][] = ['P', 'C', '1B', '2B', '3B', 'SS', 'OF'];
+const VALID_POTENTIALS: Player['potential'][] = ['S', 'A', 'B', 'C'];
 
 interface SchedulePairing {
   homeId: string;
@@ -175,6 +179,137 @@ const createTeam = (config: typeof TEAMS_CONFIG[0]): Team => {
     runsScored: 0,
     runsAllowed: 0,
   };
+};
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const isPlayer = (value: unknown): value is Player => {
+  if (!value || typeof value !== 'object') return false;
+  const player = value as Player;
+  return (
+    typeof player.id === 'string'
+    && typeof player.name === 'string'
+    && VALID_POSITIONS.includes(player.position)
+    && isFiniteNumber(player.age)
+    && VALID_POTENTIALS.includes(player.potential)
+    && isFiniteNumber(player.growthExp)
+    && isFiniteNumber(player.contact)
+    && isFiniteNumber(player.power)
+    && isFiniteNumber(player.speed)
+    && isFiniteNumber(player.defense)
+    && isFiniteNumber(player.control)
+    && isFiniteNumber(player.stamina)
+    && VALID_CONDITIONS.includes(player.condition)
+    && isFiniteNumber(player.games)
+    && isFiniteNumber(player.atBats)
+    && isFiniteNumber(player.hits)
+    && isFiniteNumber(player.homeruns)
+    && isFiniteNumber(player.rbi)
+    && isFiniteNumber(player.innings)
+    && isFiniteNumber(player.earnedRuns)
+    && isFiniteNumber(player.wins)
+    && isFiniteNumber(player.losses)
+    && isFiniteNumber(player.saves)
+  );
+};
+
+const isTeam = (value: unknown): value is Team => {
+  if (!value || typeof value !== 'object') return false;
+  const team = value as Team;
+  return (
+    typeof team.id === 'string'
+    && typeof team.name === 'string'
+    && typeof team.short === 'string'
+    && typeof team.color === 'string'
+    && typeof team.textColor === 'string'
+    && typeof team.border === 'string'
+    && typeof team.softBg === 'string'
+    && Array.isArray(team.players)
+    && team.players.length > 0
+    && team.players.every(isPlayer)
+    && isFiniteNumber(team.wins)
+    && isFiniteNumber(team.losses)
+    && isFiniteNumber(team.draws)
+    && isFiniteNumber(team.runsScored)
+    && isFiniteNumber(team.runsAllowed)
+  );
+};
+
+const isGameResult = (value: unknown): value is GameResult => {
+  if (!value || typeof value !== 'object') return false;
+  const result = value as GameResult;
+  return (
+    isFiniteNumber(result.day)
+    && typeof result.homeId === 'string'
+    && typeof result.awayId === 'string'
+    && isFiniteNumber(result.homeScore)
+    && isFiniteNumber(result.awayScore)
+    && Array.isArray(result.details)
+    && result.details.every(entry => typeof entry === 'string')
+    && Array.isArray(result.growthUpdates)
+    && result.growthUpdates.every(entry => typeof entry === 'string')
+  );
+};
+
+export const validateSavedState = (data: unknown) => {
+  if (!data || typeof data !== 'object') return null;
+
+  const candidate = data as Record<string, unknown>;
+  const { teams, currentDay, gameHistory, isPlaying, selectedTeamId, gameSpeed } = candidate;
+
+  if (!Array.isArray(teams) || teams.length === 0 || !teams.every(isTeam)) return null;
+  if (!isFiniteNumber(currentDay)) return null;
+  if (!Array.isArray(gameHistory) || !gameHistory.every(isGameResult)) return null;
+  if (isPlaying !== undefined && typeof isPlaying !== 'boolean') return null;
+  if (selectedTeamId !== undefined && selectedTeamId !== null && typeof selectedTeamId !== 'string') return null;
+  if (gameSpeed !== undefined && !isFiniteNumber(gameSpeed)) return null;
+
+  return {
+    teams: teams as Team[],
+    currentDay: currentDay as number,
+    gameHistory: gameHistory as GameResult[],
+    isPlaying: isPlaying as boolean | undefined,
+    selectedTeamId: selectedTeamId as string | null | undefined,
+    gameSpeed: gameSpeed as number | undefined,
+  };
+};
+
+export const attemptRestoreSavedState = (
+  storage: Storage,
+  storageKey: string,
+  resetSeason: () => void,
+) => {
+  const clearAndReset = () => {
+    try {
+      storage.removeItem(storageKey);
+    } catch (error) {
+      console.error('Failed to clear corrupted state', error);
+    }
+    resetSeason();
+  };
+
+  const raw = storage.getItem(storageKey);
+
+  if (!raw) {
+    resetSeason();
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const validated = validateSavedState(parsed);
+
+    if (!validated) {
+      clearAndReset();
+      return null;
+    }
+
+    return validated;
+  } catch (error) {
+    console.error('Failed to parse saved state', error);
+    clearAndReset();
+    return null;
+  }
 };
 
 const generateSchedule = (teams: Team[], totalGames: number): SchedulePairing[][] => {
@@ -413,17 +548,9 @@ export default function PennantGame() {
 
   const initializeFromStorage = useCallback(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        resetSeason();
-        return;
-      }
+      const restoredState = attemptRestoreSavedState(localStorage, STORAGE_KEY, resetSeason);
 
-      const parsed = JSON.parse(raw);
-
-      if (!parsed || typeof parsed !== 'object') {
-        localStorage.removeItem(STORAGE_KEY);
-        resetSeason();
+      if (!restoredState) {
         return;
       }
 
@@ -434,17 +561,7 @@ export default function PennantGame() {
         isPlaying: storedIsPlaying,
         selectedTeamId: storedSelectedTeamId,
         gameSpeed: storedGameSpeed,
-      } = parsed;
-
-      const isValidTeams = Array.isArray(storedTeams);
-      const isValidHistory = Array.isArray(storedHistory);
-      const isValidCurrentDay = typeof storedCurrentDay === 'number';
-
-      if (!isValidTeams || !isValidHistory || !isValidCurrentDay) {
-        localStorage.removeItem(STORAGE_KEY);
-        resetSeason();
-        return;
-      }
+      } = restoredState;
 
       const generatedSchedule = generateSchedule(storedTeams, TOTAL_GAMES);
       scheduleRef.current = generatedSchedule;
@@ -455,7 +572,7 @@ export default function PennantGame() {
       currentDayRef.current = storedCurrentDay;
       setIsPlaying(Boolean(storedIsPlaying));
       setSelectedTeamId(storedSelectedTeamId ?? (storedTeams[0]?.id ?? null));
-      setGameSpeed(typeof storedGameSpeed === 'number' ? storedGameSpeed : 500);
+      setGameSpeed(storedGameSpeed ?? 500);
     } catch (error) {
       console.error('Failed to restore state from storage', error);
       localStorage.removeItem(STORAGE_KEY);
