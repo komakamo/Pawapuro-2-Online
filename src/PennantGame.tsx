@@ -387,6 +387,7 @@ export default function PennantGame() {
 
   const getGameDiff = (targetTeam: Team) => {
     const leader = sortedTeams[0];
+    if (!leader) return '-';
     if (targetTeam.id === leader.id) return '-';
     const diff = ((leader.wins - leader.losses) - (targetTeam.wins - targetTeam.losses)) / 2;
     return diff.toFixed(1);
