@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Trophy, Calendar, User, Users, Play, FastForward, Pause, Activity, TrendingUp, ChevronsUp, Award, Shield, Zap } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Trophy, Calendar, User, Users, Play, FastForward, Pause, Activity, TrendingUp, ChevronsUp, Award, Shield, Zap, RefreshCw } from 'lucide-react';
 
 // --- Types & Constants ---
 
@@ -67,6 +67,11 @@ interface GameResult {
   awayScore: number;
   details: string[];
   growthUpdates: string[];
+}
+
+interface SchedulePairing {
+  homeId: string;
+  awayId: string;
 }
 
 // --- Helper Functions ---
@@ -170,6 +175,45 @@ const createTeam = (config: typeof TEAMS_CONFIG[0]): Team => {
     runsScored: 0,
     runsAllowed: 0,
   };
+};
+
+const generateSchedule = (teams: Team[], totalGames: number): SchedulePairing[][] => {
+  if (teams.length < 2) return [];
+
+  const teamIds = teams.map(t => t.id);
+  if (teamIds.length % 2 === 1) {
+    teamIds.push('BYE');
+  }
+
+  const rotation = teamIds.slice(1);
+  const totalTeams = teamIds.length;
+  const baseRoundLength = totalTeams - 1;
+  const schedule: SchedulePairing[][] = [];
+  let toggleHome = false;
+
+  while (schedule.length < totalGames) {
+    for (let round = 0; round < baseRoundLength && schedule.length < totalGames; round++) {
+      const teamsForRound = [teamIds[0], ...rotation];
+      const pairings: SchedulePairing[] = [];
+
+      for (let i = 0; i < totalTeams / 2; i++) {
+        const teamA = teamsForRound[i];
+        const teamB = teamsForRound[totalTeams - 1 - i];
+
+        if (teamA === 'BYE' || teamB === 'BYE') continue;
+
+        const homeId = toggleHome ? teamB : teamA;
+        const awayId = toggleHome ? teamA : teamB;
+        pairings.push({ homeId, awayId });
+      }
+
+      schedule.push(pairings);
+      rotation.unshift(rotation.pop()!);
+      toggleHome = !toggleHome;
+    }
+  }
+
+  return schedule.slice(0, totalGames);
 };
 
 // --- Simulation Logic ---
@@ -348,11 +392,25 @@ export default function PennantGame() {
   const [gameSpeed, setGameSpeed] = useState(500);
   const teamsRef = useRef<Team[]>([]);
   const currentDayRef = useRef(currentDay);
+  const scheduleRef = useRef<SchedulePairing[][]>([]);
+
+  const resetSeason = useCallback(() => {
+    const initialTeams = TEAMS_CONFIG.map(createTeam);
+    const generatedSchedule = generateSchedule(initialTeams, TOTAL_GAMES);
+
+    scheduleRef.current = generatedSchedule;
+    setTeams(initialTeams);
+    teamsRef.current = initialTeams;
+    setGameHistory([]);
+    setCurrentDay(1);
+    currentDayRef.current = 1;
+    setIsPlaying(false);
+    setSelectedTeamId(initialTeams[0]?.id ?? null);
+  }, []);
 
   useEffect(() => {
-    const initialTeams = TEAMS_CONFIG.map(createTeam);
-    setTeams(initialTeams);
-  }, []);
+    resetSeason();
+  }, [resetSeason]);
 
   useEffect(() => {
     teamsRef.current = teams;
@@ -364,11 +422,13 @@ export default function PennantGame() {
 
   useEffect(() => {
     let interval: number;
-    if (isPlaying && currentDay <= TOTAL_GAMES) {
+    const hasScheduleForDay = !!scheduleRef.current[currentDay - 1];
+
+    if (isPlaying && currentDay <= TOTAL_GAMES && hasScheduleForDay) {
       interval = window.setInterval(() => {
         playDay();
       }, gameSpeed);
-    } else if (currentDay > TOTAL_GAMES) {
+    } else if (currentDay > TOTAL_GAMES || !hasScheduleForDay) {
       setIsPlaying(false);
     }
     return () => clearInterval(interval);
@@ -384,20 +444,23 @@ export default function PennantGame() {
       return;
     }
 
-    const shuffled = [...currentTeams].sort(() => Math.random() - 0.5);
-    const matchups: [Team, Team][] = [];
-
-    for (let i = 0; i < shuffled.length - 1; i += 2) {
-      matchups.push([shuffled[i], shuffled[i + 1]]);
+    const dailySchedule = scheduleRef.current[day - 1];
+    if (!dailySchedule) {
+      setIsPlaying(false);
+      return;
     }
 
     const dayResults: GameResult[] = [];
     const nextTeamsState = [...currentTeams];
 
-    matchups.forEach(([home, away]) => {
-      const hIndex = nextTeamsState.findIndex(t => t.id === home.id);
-      const aIndex = nextTeamsState.findIndex(t => t.id === away.id);
-      
+    dailySchedule.forEach(({ homeId, awayId }) => {
+      const hIndex = nextTeamsState.findIndex(t => t.id === homeId);
+      const aIndex = nextTeamsState.findIndex(t => t.id === awayId);
+
+      if (hIndex === -1 || aIndex === -1) {
+        return;
+      }
+
       const { result, updatedHome, updatedAway } = simulateMatch(nextTeamsState[hIndex], nextTeamsState[aIndex], day);
       
       nextTeamsState[hIndex] = updatedHome;
@@ -428,6 +491,21 @@ export default function PennantGame() {
     const diff = ((leader.wins - leader.losses) - (targetTeam.wins - targetTeam.losses)) / 2;
     return diff.toFixed(1);
   };
+
+  const nextMatchups = useMemo(() => {
+    const schedule = scheduleRef.current;
+    const upcoming = schedule[currentDay - 1];
+    if (!upcoming) return [];
+
+    return upcoming
+      .map(pair => {
+        const home = teams.find(t => t.id === pair.homeId);
+        const away = teams.find(t => t.id === pair.awayId);
+        if (!home || !away) return null;
+        return { home, away };
+      })
+      .filter((m): m is { home: Team; away: Team } => m !== null);
+  }, [currentDay, teams]);
 
   const renderAbilityRank = (val: number) => {
     let rank = 'G';
@@ -594,6 +672,15 @@ export default function PennantGame() {
                   >
                     <FastForward className="w-5 h-5" />
                   </button>
+
+                  <button
+                    onClick={resetSeason}
+                    disabled={isPlaying}
+                    className="p-3 rounded-xl bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="シーズンをリセット"
+                  >
+                    <RefreshCw className="w-5 h-5" />
+                  </button>
                 </>
               ) : (
                 <div className="px-6 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center space-x-2 shadow-md">
@@ -607,7 +694,47 @@ export default function PennantGame() {
 
       {/* Content Area */}
       <div className="px-4 md:px-6 pb-12">
-        
+
+        <div className="mb-6">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <Calendar className="w-5 h-5 text-blue-500" />
+                <span className="font-bold text-gray-700">次の対戦表プレビュー</span>
+              </div>
+              <span className="text-xs text-gray-400 font-mono">{scheduleRef.current[currentDay - 1] ? `DAY ${currentDay}` : 'NO UPCOMING GAMES'}</span>
+            </div>
+            {nextMatchups.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {nextMatchups.map(({ home, away }) => (
+                  <div key={`${home.id}-${away.id}`} className="p-3 rounded-xl border border-gray-100 bg-gradient-to-br from-slate-50 to-white shadow-sm">
+                    <div className="text-[10px] text-gray-400 font-bold uppercase mb-1">Upcoming</div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-8 h-8 rounded-lg ${home.color} text-white flex items-center justify-center font-bold`}>{home.short}</span>
+                        <div>
+                          <div className="text-xs text-gray-400">Home</div>
+                          <div className="font-bold text-gray-800">{home.name}</div>
+                        </div>
+                      </div>
+                      <div className="text-gray-400 font-bold">vs</div>
+                      <div className="flex items-center space-x-2">
+                        <div className="text-right">
+                          <div className="text-xs text-gray-400">Away</div>
+                          <div className="font-bold text-gray-800">{away.name}</div>
+                        </div>
+                        <span className={`w-8 h-8 rounded-lg ${away.color} text-white flex items-center justify-center font-bold`}>{away.short}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">シーズン終了、または日程が存在しません。</div>
+            )}
+          </div>
+        </div>
+
         {/* --- LEAGUE VIEW --- */}
         {view === 'league' && (
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
