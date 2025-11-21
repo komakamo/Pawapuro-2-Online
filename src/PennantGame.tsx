@@ -265,7 +265,7 @@ const simulateMatch = (home: Team, away: Team, day: number): { result: GameResul
              const roll = Math.random();
              if (roll < 0.4 && newP.stamina < 99) { newP.stamina += growthAmount; statGrown = 'スタミナ'; }
              else if (roll < 0.8 && newP.control < 99) { newP.control += growthAmount; statGrown = 'コントロール'; }
-             else if (newP.speed < 160) { newP.speed += 1; statGrown = '球速'; }
+             else if (newP.speed < 99) { newP.speed += 1; statGrown = '球速'; }
          } else {
              const roll = Math.random();
              if (roll < 0.3 && newP.contact < 99) { newP.contact += growthAmount; statGrown = 'ミート'; }
