@@ -382,6 +382,7 @@ const simulateMatch = (home: Team, away: Team, day: number): { result: GameResul
 
 export default function PennantGame() {
   const TOTAL_GAMES = 143;
+  const STORAGE_KEY = 'pennantGameState';
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentDay, setCurrentDay] = useState(1);
@@ -390,6 +391,7 @@ export default function PennantGame() {
   const [view, setView] = useState<'league' | 'schedule' | 'team'>('league');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [gameSpeed, setGameSpeed] = useState(500);
+  const [isInitialized, setIsInitialized] = useState(false);
   const teamsRef = useRef<Team[]>([]);
   const currentDayRef = useRef(currentDay);
   const scheduleRef = useRef<SchedulePairing[][]>([]);
@@ -406,11 +408,98 @@ export default function PennantGame() {
     currentDayRef.current = 1;
     setIsPlaying(false);
     setSelectedTeamId(initialTeams[0]?.id ?? null);
+    setGameSpeed(500);
   }, []);
 
-  useEffect(() => {
+  const initializeFromStorage = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        resetSeason();
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+
+      if (!parsed || typeof parsed !== 'object') {
+        localStorage.removeItem(STORAGE_KEY);
+        resetSeason();
+        return;
+      }
+
+      const {
+        teams: storedTeams,
+        currentDay: storedCurrentDay,
+        gameHistory: storedHistory,
+        isPlaying: storedIsPlaying,
+        selectedTeamId: storedSelectedTeamId,
+        gameSpeed: storedGameSpeed,
+      } = parsed;
+
+      const isValidTeams = Array.isArray(storedTeams);
+      const isValidHistory = Array.isArray(storedHistory);
+      const isValidCurrentDay = typeof storedCurrentDay === 'number';
+
+      if (!isValidTeams || !isValidHistory || !isValidCurrentDay) {
+        localStorage.removeItem(STORAGE_KEY);
+        resetSeason();
+        return;
+      }
+
+      const generatedSchedule = generateSchedule(storedTeams, TOTAL_GAMES);
+      scheduleRef.current = generatedSchedule;
+      setTeams(storedTeams);
+      teamsRef.current = storedTeams;
+      setGameHistory(storedHistory);
+      setCurrentDay(storedCurrentDay);
+      currentDayRef.current = storedCurrentDay;
+      setIsPlaying(Boolean(storedIsPlaying));
+      setSelectedTeamId(storedSelectedTeamId ?? (storedTeams[0]?.id ?? null));
+      setGameSpeed(typeof storedGameSpeed === 'number' ? storedGameSpeed : 500);
+    } catch (error) {
+      console.error('Failed to restore state from storage', error);
+      localStorage.removeItem(STORAGE_KEY);
+      resetSeason();
+    } finally {
+      setIsInitialized(true);
+    }
+  }, [resetSeason]);
+
+  const persistState = useCallback(() => {
+    try {
+      const payload = {
+        teams,
+        currentDay,
+        gameHistory,
+        isPlaying,
+        selectedTeamId,
+        gameSpeed,
+      };
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error('Failed to persist state', error);
+    }
+  }, [teams, currentDay, gameHistory, isPlaying, selectedTeamId, gameSpeed]);
+
+  const resetProgress = useCallback(() => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear saved data', error);
+    }
     resetSeason();
   }, [resetSeason]);
+
+  useEffect(() => {
+    initializeFromStorage();
+  }, [initializeFromStorage]);
+
+  useEffect(() => {
+    if (isInitialized) {
+      persistState();
+    }
+  }, [persistState, isInitialized]);
 
   useEffect(() => {
     teamsRef.current = teams;
@@ -674,12 +763,13 @@ export default function PennantGame() {
                   </button>
 
                   <button
-                    onClick={resetSeason}
+                    onClick={resetProgress}
                     disabled={isPlaying}
-                    className="p-3 rounded-xl bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="シーズンをリセット"
+                    className="flex items-center space-x-2 px-4 py-3 rounded-xl bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="進行データをリセット"
                   >
                     <RefreshCw className="w-5 h-5" />
+                    <span className="text-sm font-bold hidden sm:inline">進行データをリセット</span>
                   </button>
                 </>
               ) : (
