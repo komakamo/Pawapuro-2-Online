@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Trophy, Calendar, User, Users, Play, FastForward, Pause, Activity, TrendingUp, ChevronsUp, Award, Shield, Zap } from 'lucide-react';
 
 // --- Types & Constants ---
@@ -330,11 +330,21 @@ export default function PennantGame() {
   const [view, setView] = useState<'league' | 'schedule' | 'team'>('league');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [gameSpeed, setGameSpeed] = useState(500);
+  const teamsRef = useRef<Team[]>([]);
+  const currentDayRef = useRef(currentDay);
 
   useEffect(() => {
     const initialTeams = TEAMS_CONFIG.map(createTeam);
     setTeams(initialTeams);
   }, []);
+
+  useEffect(() => {
+    teamsRef.current = teams;
+  }, [teams]);
+
+  useEffect(() => {
+    currentDayRef.current = currentDay;
+  }, [currentDay]);
 
   useEffect(() => {
     let interval: number;
@@ -346,16 +356,19 @@ export default function PennantGame() {
       setIsPlaying(false);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, currentDay, teams, gameSpeed]);
+  }, [isPlaying, currentDay, gameSpeed]);
 
   const playDay = () => {
-    if (currentDay > TOTAL_GAMES) return;
-    if (teams.length < 6) {
+    const day = currentDayRef.current;
+    const currentTeams = teamsRef.current;
+
+    if (day > TOTAL_GAMES) return;
+    if (currentTeams.length < 6) {
       setIsPlaying(false);
       return;
     }
 
-    const shuffled = [...teams].sort(() => Math.random() - 0.5);
+    const shuffled = [...currentTeams].sort(() => Math.random() - 0.5);
     const matchups: [Team, Team][] = [];
 
     for (let i = 0; i < shuffled.length - 1; i += 2) {
@@ -363,19 +376,20 @@ export default function PennantGame() {
     }
 
     const dayResults: GameResult[] = [];
-    const nextTeamsState = [...teams];
+    const nextTeamsState = [...currentTeams];
 
     matchups.forEach(([home, away]) => {
       const hIndex = nextTeamsState.findIndex(t => t.id === home.id);
       const aIndex = nextTeamsState.findIndex(t => t.id === away.id);
       
-      const { result, updatedHome, updatedAway } = simulateMatch(nextTeamsState[hIndex], nextTeamsState[aIndex], currentDay);
+      const { result, updatedHome, updatedAway } = simulateMatch(nextTeamsState[hIndex], nextTeamsState[aIndex], day);
       
       nextTeamsState[hIndex] = updatedHome;
       nextTeamsState[aIndex] = updatedAway;
       dayResults.push(result);
     });
 
+    teamsRef.current = nextTeamsState;
     setTeams(nextTeamsState);
     setGameHistory(prev => [...dayResults, ...prev]);
     setCurrentDay(d => d + 1);
