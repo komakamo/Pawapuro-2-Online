@@ -353,7 +353,7 @@ const generateSchedule = (teams: Team[], totalGames: number): SchedulePairing[][
 
 // --- Simulation Logic ---
 
-const simulateMatch = (home: Team, away: Team, day: number): { result: GameResult, updatedHome: Team, updatedAway: Team } => {
+export const simulateMatch = (home: Team, away: Team, day: number): { result: GameResult, updatedHome: Team, updatedAway: Team } => {
   const updateCondition = (p: Player): Player => ({
     ...p,
     condition: Math.random() < 0.2 ? getRandomCondition() : p.condition
@@ -388,41 +388,132 @@ const simulateMatch = (home: Team, away: Team, day: number): { result: GameResul
   const growthEvents: string[] = [];
 
   const resolveStatsAndGrowth = (teamPlayers: Player[], teamName: string, ownScore: number, oppScore: number, isWin: boolean, isLoss: boolean): Player[] => {
+    // Determine pitching rotation for this game
+    const pitchers = teamPlayers.filter(p => p.position === 'P');
+
+    // Safety: if no pitchers, just return
+    if (pitchers.length === 0) return teamPlayers;
+
+    const starters = pitchers.filter(p => p.id.endsWith('p1') || p.id.endsWith('p2'));
+    const relievers = pitchers.filter(p => !p.id.endsWith('p1') && !p.id.endsWith('p2'));
+
+    // Pick one starter (Safety fallback to any pitcher if no designated starters)
+    const starterPool = starters.length > 0 ? starters : pitchers;
+    const starter = starterPool[Math.floor(Math.random() * starterPool.length)];
+
+    const inningsMap = new Map<string, number>();
+    const selectedRelieverIds: string[] = [];
+
+    // Distribute innings
+    const gameLength = 9;
+    let starterInnings = Math.min(gameLength, Math.floor(Math.random() * 4) + 5); // 5 to 8 innings, or 9
+    if (Math.random() < 0.1) starterInnings = 9; // 10% chance of complete game attempt
+
+    let remainingInnings = gameLength - starterInnings;
+
+    inningsMap.set(starter.id, starterInnings);
+
+    // Pick relievers if needed
+    if (remainingInnings > 0) {
+        const availableRelievers = relievers.length > 0 ? relievers : pitchers.filter(p => p.id !== starter.id);
+
+        // Shuffle relievers
+        const shuffledRelievers = [...availableRelievers].sort(() => Math.random() - 0.5);
+
+        for (const reliever of shuffledRelievers) {
+            if (remainingInnings <= 0) break;
+            const innings = Math.min(remainingInnings, Math.floor(Math.random() * 2) + 1);
+
+            inningsMap.set(reliever.id, innings);
+            selectedRelieverIds.push(reliever.id);
+            remainingInnings -= innings;
+        }
+
+        // If still remaining (rare), give to last reliever or back to starter
+        if (remainingInnings > 0) {
+            if (selectedRelieverIds.length > 0) {
+                const lastId = selectedRelieverIds[selectedRelieverIds.length - 1];
+                inningsMap.set(lastId, (inningsMap.get(lastId) || 0) + remainingInnings);
+            } else {
+                inningsMap.set(starter.id, (inningsMap.get(starter.id) || 0) + remainingInnings);
+            }
+        }
+    }
+
+    // Determine Win/Loss/Save decision
+    let winningPitcherId: string | null = null;
+    let losingPitcherId: string | null = null;
+    let savePitcherId: string | null = null;
+
+    // Re-fetch starter innings from map in case it was updated
+    const finalStarterInnings = inningsMap.get(starter.id) || 0;
+
+    if (isWin) {
+        if (finalStarterInnings >= 5) {
+            winningPitcherId = starter.id;
+        } else {
+            if (selectedRelieverIds.length > 0) {
+                winningPitcherId = selectedRelieverIds[0];
+            } else {
+                winningPitcherId = starter.id; // Fallback
+            }
+        }
+
+        // Save condition: Close game (<= 3 diff) and not the winner
+        if (Math.abs(ownScore - oppScore) <= 3 && selectedRelieverIds.length > 0) {
+             const closerId = selectedRelieverIds[selectedRelieverIds.length - 1];
+             if (closerId !== winningPitcherId) {
+                 savePitcherId = closerId;
+             }
+        }
+
+    } else if (isLoss) {
+        losingPitcherId = starter.id;
+    }
+
     return teamPlayers.map(p => {
       let newP = { ...p };
       let xpGained = 10;
 
       if (p.position === 'P') {
-        const isStarter = p.id.endsWith('p1') || p.id.endsWith('p2');
-
-        if (isStarter) {
-          const innings = Math.random() * 3 + 5;
-          const er = Math.floor((oppScore / 9) * innings);
-
-          newP.games += 1;
-          newP.innings += innings;
-          newP.earnedRuns += er;
-          if (isWin) { newP.wins += 1; xpGained += 50; }
-          if (isLoss) { newP.losses += 1; xpGained += 10; }
-
-          xpGained += innings * 5;
-          if (er === 0) xpGained += 30;
-        } else {
-          const innings = Math.random() * 2 + 1; // 1~3回程度を想定
-          const er = Math.max(0, Math.floor((oppScore / 9) * innings + (Math.random() < 0.3 ? 1 : 0)));
-
-          newP.games += 1;
-          newP.innings += innings;
-          newP.earnedRuns += er;
-
-          const pitchedCleanInWin = isWin && er === 0;
-          if (isWin && Math.random() < 0.25) { newP.wins += 1; xpGained += 30; }
-          else if (pitchedCleanInWin) { newP.saves += 1; xpGained += 40; }
-          else if (isLoss) { newP.losses += 1; xpGained += 10; }
-
-          xpGained += innings * 4;
-          if (er === 0) xpGained += 20;
+        if (!inningsMap.has(p.id)) {
+            // Did not play
+            return newP;
         }
+
+        const innings = inningsMap.get(p.id) || 0;
+
+        // Distribute ER roughly proportional to innings, with some randomness
+        // Total runs = oppScore.
+        // We can't easily distribute exactly to sum up to oppScore without a pass,
+        // but let's approximate.
+        // Actually, we should probably pre-calculate ERs too if we want to be precise,
+        // but probabilistic per pitcher is okay if we accept it might not sum exactly to team runs allowed (which is stored on Team, not sum of players).
+        // Wait, Team runsAllowed IS updated by `awayScore` / `homeScore` passed to `resolveStatsAndGrowth`.
+        // The individual player stats don't HAVE to sum exactly to team stats in this simple sim, but better if they do.
+        // Let's just use the logic: ER = (oppScore / 9) * innings
+
+        const er = Math.floor((oppScore / 9) * innings + (Math.random() < 0.2 ? 1 : 0)); // Slight noise
+
+        newP.games += 1;
+        newP.innings += innings;
+        newP.earnedRuns += er;
+
+        if (p.id === winningPitcherId) {
+            newP.wins += 1;
+            xpGained += 50;
+        }
+        if (p.id === losingPitcherId) {
+            newP.losses += 1;
+            xpGained += 10;
+        }
+        if (p.id === savePitcherId) {
+            newP.saves += 1;
+            xpGained += 40;
+        }
+
+        xpGained += innings * 5;
+        if (er === 0) xpGained += 20;
 
       } else {
         const abs = Math.floor(Math.random() * 2) + 3;
